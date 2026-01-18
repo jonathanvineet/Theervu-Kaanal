@@ -3,6 +3,7 @@ import Petitioner from '../models/Petitioner.js';
 import Official from '../models/Official.js';
 import Admin from '../models/Admin.js';
 import { JWT_SECRET, JWT_OPTIONS } from '../config/jwt.js';
+import { supabase } from '../config/supabase.js';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -62,61 +63,42 @@ export const auth = async (req, res, next) => {
 
         const token = authHeader.replace('Bearer ', '');
 
-        // First decode without verification to check expiration
-        const decoded = jwt.decode(token);
-        if (!decoded) {
-            console.error('Token decode failed');
+        // Verify Supabase token
+        const { data: { user: supabaseUser }, error: supabaseError } = await supabase.auth.getUser(token);
+
+        if (supabaseError || !supabaseUser) {
+            console.error('Supabase token verification failed:', supabaseError?.message);
             return res.status(401).json({
-                message: 'Invalid token format',
+                message: 'Invalid or expired token',
                 code: 'INVALID_TOKEN'
             });
         }
 
-        // Check if token is expired
-        if (decoded.exp && decoded.exp < Math.floor(Date.now() / 1000)) {
-            console.error('Token expired');
-            return res.status(401).json({
-                message: 'Token has expired',
-                code: 'TOKEN_EXPIRED'
-            });
-        }
-
-        // Now verify the token
-        const verified = jwt.verify(token, JWT_SECRET, JWT_OPTIONS);
-
-        // Check for service token
-        if (verified.role === 'service') {
-            // Special case for service account tokens
-            req.user = {
-                id: verified.id || 'service',
-                role: 'service',
-                department: verified.department || 'System'
-            };
-            console.log('✅ Service authentication successful');
-            return next();
-        }
-
-        // Look up user based on role and ID
+        // Get user role and details from metadata or database
+        const userEmail = supabaseUser.email;
+        
+        // Look up user in MongoDB to get role and other details
         let user;
-        switch (verified.role) {
-            case 'petitioner':
-                user = await Petitioner.findById(verified.id);
-                break;
-            case 'official':
-                user = await Official.findById(verified.id);
-                break;
-            case 'admin':
-                user = await Admin.findById(verified.id);
-                break;
-            default:
-                return res.status(401).json({
-                    message: 'Invalid user role',
-                    code: 'INVALID_ROLE'
-                });
+        let userRole;
+
+        // Try to find user in each collection
+        user = await Petitioner.findOne({ email: userEmail });
+        if (user) {
+            userRole = 'petitioner';
+        } else {
+            user = await Official.findOne({ email: userEmail });
+            if (user) {
+                userRole = 'official';
+            } else {
+                user = await Admin.findOne({ email: userEmail });
+                if (user) {
+                    userRole = 'admin';
+                }
+            }
         }
 
         if (!user) {
-            console.error('User not found:', verified.id);
+            console.error('User not found in database:', userEmail);
             return res.status(401).json({
                 message: 'User not found',
                 code: 'USER_NOT_FOUND'
@@ -126,7 +108,8 @@ export const auth = async (req, res, next) => {
         // Add user info to request
         req.user = {
             id: user._id.toString(),
-            role: verified.role,
+            supabaseId: supabaseUser.id,
+            role: userRole,
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,

@@ -5,6 +5,7 @@ import Petitioner from '../models/Petitioner.js';
 import Admin from '../models/Admin.js';
 import Grievance from '../models/Grievance.js';
 import { JWT_SECRET, JWT_OPTIONS } from '../config/jwt.js';
+import { supabase, supabaseAdmin } from '../config/supabase.js';
 
 // Helper function to calculate token expiration
 const calculateTokenExpiration = () => {
@@ -195,34 +196,37 @@ export const loginPetitioner = async (req, res) => {
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
-        // Find petitioner by email
+        // Authenticate with Supabase
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
+
+        if (authError || !authData.user) {
+            console.log('❌ Supabase authentication failed:', authError?.message);
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Find petitioner in MongoDB
         const petitioner = await Petitioner.findOne({ email });
         if (!petitioner) {
-            console.log('❌ Petitioner not found:', email);
-            return res.status(401).json({ error: 'Invalid credentials' });
+            console.log('❌ Petitioner not found in database:', email);
+            return res.status(401).json({ error: 'User not found' });
         }
 
-        // Check password
-        const isPasswordValid = await bcrypt.compare(password, petitioner.password);
-        if (!isPasswordValid) {
-            console.log('❌ Password mismatch for petitioner:', email);
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Set role explicitly before generating token
+        // Set role explicitly
         petitioner.role = 'petitioner';
-
-        // Generate JWT token
-        const token = generateToken(petitioner);
 
         console.log('✅ Petitioner logged in successfully:', petitioner.email);
 
-        // Return user data with token
+        // Return user data with Supabase session
         res.status(200).json({
             message: 'Login successful',
-            token,
+            token: authData.session.access_token,
+            refreshToken: authData.session.refresh_token,
             user: {
                 id: petitioner._id.toString(),
+                supabaseId: authData.user.id,
                 firstName: petitioner.firstName,
                 lastName: petitioner.lastName,
                 email: petitioner.email,
@@ -241,26 +245,29 @@ export const loginOfficial = async (req, res) => {
     try {
         const { email, password, department, employeeId } = req.body;
 
-        // Find official by email
+        // Authenticate with Supabase
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
+
+        if (authError || !authData.user) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Find official in MongoDB
         const official = await Official.findOne({ email });
         if (!official) {
-            return res.status(401).json({ error: 'Invalid credentials' });
+            return res.status(401).json({ error: 'User not found' });
         }
-
-        // Check password
-        const isPasswordValid = await bcrypt.compare(password, official.password);
-        if (!isPasswordValid) {
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Generate JWT token
-        const token = generateToken(official);
 
         res.status(200).json({
             message: 'Login successful',
-            token,
+            token: authData.session.access_token,
+            refreshToken: authData.session.refresh_token,
             user: {
                 id: official._id.toString(),
+                supabaseId: authData.user.id,
                 firstName: official.firstName,
                 lastName: official.lastName,
                 email: official.email,
@@ -280,26 +287,29 @@ export const loginOfficial = async (req, res) => {
 
 // Admin Login
 export const loginAdmin = async (req, res) => {
-    try {
-        const { email, password, adminId } = req.body;
+    try {Authenticate with Supabase
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
 
-        // Find admin by email
+        if (authError || !authData.user) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Find admin in MongoDB
         const admin = await Admin.findOne({ email });
         if (!admin) {
-            return res.status(401).json({ error: 'Invalid credentials' });
+            return res.status(401).json({ error: 'User not found' });
         }
-
-        // Check password
-        const isPasswordValid = await bcrypt.compare(password, admin.password);
-        if (!isPasswordValid) {
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Generate JWT token
-        const token = generateToken(admin);
 
         res.status(200).json({
             message: 'Login successful',
+            token: authData.session.access_token,
+            refreshToken: authData.session.refresh_token,
+            user: {
+                id: admin._id.toString(),
+                supabaseId: authData.user.id
             token,
             user: {
                 id: admin._id.toString(),
@@ -360,7 +370,7 @@ export const registerPetitioner = async (req, res) => {
             });
         }
 
-        // Check if user already exists
+        // Check if user already exists in MongoDB
         const existingUser = await Petitioner.findOne({ email });
         if (existingUser) {
             return res.status(400).json({
@@ -369,32 +379,52 @@ export const registerPetitioner = async (req, res) => {
             });
         }
 
-        // Hash password
+        // Register with Supabase
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                data: {
+                    name,
+                    role: 'petitioner'
+                }
+            }
+        });
+
+        if (authError) {
+            console.error('Supabase registration error:', authError);
+            return res.status(400).json({
+                success: false,
+                message: authError.message || 'Registration with authentication service failed'
+            });
+        }
+
+        // Hash password for MongoDB (keeping for compatibility)
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // Create new petitioner
+        // Create new petitioner in MongoDB
         const petitioner = new Petitioner({
             name,
             email,
             password: hashedPassword,
             phone,
-            address
+            address,
+            supabaseId: authData.user?.id
         });
 
         await petitioner.save();
-
-        // Generate token
-        const token = generateToken(petitioner._id, 'petitioner');
 
         // Return success response
         res.status(201).json({
             success: true,
             message: 'Registration successful',
             data: {
-                token,
+                token: authData.session?.access_token,
+                refreshToken: authData.session?.refresh_token,
                 user: {
                     id: petitioner._id,
+                    supabaseId: authData.user?.id,
                     name: petitioner.name,
                     email: petitioner.email,
                     role: 'petitioner'

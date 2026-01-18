@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getRedirectPath } from '../utils/authUtils';
+import { supabase } from '../config/supabase';
 
 const AuthContext = createContext(null);
 
@@ -84,50 +85,74 @@ export const AuthProvider = ({ children }) => {
     };
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        const storedUser = localStorage.getItem('user');
-
-        console.log('Initial auth check:', { hasToken: !!token, hasStoredUser: !!storedUser });
-
-        if (token && storedUser) {
+        // Check active session
+        const initializeAuth = async () => {
             try {
-                const decoded = decodeToken(token);
-                console.log('Decoded token:', decoded);
+                const { data: { session }, error } = await supabase.auth.getSession();
+                
+                if (error) {
+                    console.error('Session error:', error);
+                    setUser(null);
+                    setLoading(false);
+                    return;
+                }
 
-                if (decoded && decoded.exp * 1000 > Date.now()) {
-                    // Token is valid, set user from localStorage with proper role casing
-                    const parsedUser = JSON.parse(storedUser);
-                    console.log('Parsed stored user:', parsedUser);
-
-                    // Ensure consistent role casing
-                    parsedUser.role = parsedUser.role.charAt(0).toUpperCase() + parsedUser.role.slice(1).toLowerCase();
-                    console.log('Setting user state to:', parsedUser);
-                    setUser(parsedUser);
-
-                    // Check if token is expiring soon
-                    if (isTokenExpiringSoon(decoded)) {
-                        setTokenExpiryWarning(true);
+                if (session?.user) {
+                    // Get user details from stored data or fetch from backend
+                    const storedUser = localStorage.getItem('user');
+                    if (storedUser) {
+                        const parsedUser = JSON.parse(storedUser);
+                        setUser(parsedUser);
+                    } else {
+                        // If no stored user, try to fetch from backend
+                        await refreshUser(session.access_token);
                     }
                 } else {
-                    // Token expired, clear everything
-                    console.log('Token expired or invalid, logging out');
-                    logout();
+                    setUser(null);
                 }
             } catch (error) {
-                console.error('Error restoring session:', error);
-                logout();
+                console.error('Error initializing auth:', error);
+                setUser(null);
+            } finally {
+                setLoading(false);
             }
-        } else {
-            // No token or user data found
-            console.log('No auth data found, setting user to null');
-            setUser(null);
-        }
-        setLoading(false);
+        };
+
+        initializeAuth();
+
+        // Listen for auth changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log('Auth state changed:', event);
+            
+            if (event === 'SIGNED_IN' && session) {
+                const storedUser = localStorage.getItem('user');
+                if (storedUser) {
+                    setUser(JSON.parse(storedUser));
+                }
+            } else if (event === 'SIGNED_OUT') {
+                setUser(null);
+                localStorage.removeItem('user');
+                localStorage.removeItem('token');
+            } else if (event === 'TOKEN_REFRESHED') {
+                const newToken = session?.access_token;
+                if (newToken) {
+                    localStorage.setItem('token', newToken);
+                }
+            }
+        });
+
+        return () => {
+            subscription?.unsubscribe();
+        };
     }, []);
 
-    const refreshUser = async () => {
+    const refreshUser = async (token) => {
         try {
-            const response = await authenticatedFetch('https://theervu-kaanal.onrender.com/api/users/profile');
+            const response = await fetch('https://theervu-kaanal.onrender.com/api/users/profile', {
+                headers: {
+                    'Authorization': `Bearer ${token || localStorage.getItem('token')}`
+                }
+            });
             const data = await response.json();
 
             if (response.ok) {
@@ -137,13 +162,9 @@ export const AuthProvider = ({ children }) => {
                 };
                 localStorage.setItem('user', JSON.stringify(userData));
                 setUser(userData);
-            } else {
-                // Handle case where profile fetch fails, maybe due to token expiry
-                logout();
             }
         } catch (error) {
             console.error('Error refreshing user data:', error);
-            logout(); // Logout on error to be safe
         }
     };
 
@@ -157,11 +178,6 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('user', JSON.stringify(userData));
         setUser(userData);
     };
-
-    useEffect(() => {
-        const interval = setInterval(checkTokenExpiration, 30000); // Check every 30 seconds
-        return () => clearInterval(interval);
-    }, []);
 
     const login = async (email, password, department = null, employeeId = null, adminId = null) => {
         try {
@@ -201,10 +217,16 @@ export const AuthProvider = ({ children }) => {
                 throw new Error(data.error || 'Login failed');
             }
 
-            // Store token in localStorage
+            // Store Supabase token
             if (data.token) {
                 console.log('Storing auth data...');
                 localStorage.setItem('token', data.token);
+                
+                // Store refresh token if available
+                if (data.refreshToken) {
+                    localStorage.setItem('refreshToken', data.refreshToken);
+                }
+
                 // Ensure user role is properly cased
                 const userData = {
                     ...data.user,
@@ -212,10 +234,8 @@ export const AuthProvider = ({ children }) => {
                 };
                 console.log('Processed user data:', userData);
 
-                // Store user data in localStorage
+                // Store user data
                 localStorage.setItem('user', JSON.stringify(userData));
-                // Set user in state
-                console.log('Setting user state:', userData);
                 setUser(userData);
 
                 // Navigate based on role
@@ -233,10 +253,14 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const logout = () => {
+    const logout = async () => {
         try {
+            // Sign out from Supabase
+            await supabase.auth.signOut();
+            
             // Clear all auth-related data from localStorage
             localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
             localStorage.removeItem('user');
 
             // Reset state

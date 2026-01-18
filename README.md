@@ -5,7 +5,8 @@ A comprehensive Grievance Redressal System with AI-powered Smart Query Assistant
 ## Features
 
 - 🤖 **Smart Query Chatbot** - AI-powered assistant using Google Gemini for grievance support
-- 📊 **Admin Dashboard** - Complete oversight and analytics for grievance management
+- � **Supabase Authentication** - Secure authentication with Supabase Auth
+- �📊 **Admin Dashboard** - Complete oversight and analytics for grievance management
 - 💬 **Real-time Chat** - Instant communication between petitioners and officials
 - 📁 **Document Management** - Upload and track grievance-related documents
 - 🔔 **Notification System** - Real-time updates on grievance status
@@ -27,8 +28,9 @@ A comprehensive Grievance Redressal System with AI-powered Smart Query Assistant
 ### Backend
 - Node.js & Express
 - MongoDB & Mongoose
+- **Supabase** (Authentication)
 - Socket.io (real-time communication)
-- JWT Authentication
+- JWT Authentication (legacy support)
 - Google Generative AI (Gemini)
 - Xenova Transformers
 - Multer (file uploads)
@@ -40,6 +42,7 @@ Before you begin, ensure you have the following installed:
 - **Node.js** (v18.0.0 or higher)
 - **npm** (comes with Node.js)
 - **MongoDB** (local installation or MongoDB Atlas account)
+- **Supabase Account** (free at [supabase.com](https://supabase.com))
 
 ## Installation
 
@@ -58,7 +61,7 @@ Before you begin, ensure you have the following installed:
 
 3. **Configure environment variables**
    
-   Create a `.env` file in the `server` directory with the following:
+   **Server (.env in server directory):**
    ```env
    PORT=5000
    MONGODB_URI=your_mongodb_connection_string
@@ -66,7 +69,25 @@ Before you begin, ensure you have the following installed:
    NODE_ENV=development
    JWT_EXPIRY=24h
    GEMINI_API_KEY=your_gemini_api_key
+   
+   # Supabase Configuration
+   SUPABASE_URL=your_supabase_project_url
+   SUPABASE_ANON_KEY=your_supabase_anon_key
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
    ```
+   
+   **Client (.env in client directory):**
+   ```env
+   REACT_APP_SUPABASE_URL=your_supabase_project_url
+   REACT_APP_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+   
+   **Setting up Supabase:**
+   - Go to [https://supabase.com](https://supabase.com) and create a free account
+   - Create a new project
+   - Go to Project Settings > API
+   - Copy the `URL` and `anon public` key to your `.env` files
+   - The service role key can be found under "Project API keys" (use with caution, it bypasses Row Level Security)
 
 4. **Start the application**
    ```bash
@@ -167,6 +188,16 @@ Theervu-Kaanal/
 | `JWT_EXPIRY` | JWT token expiration time | Yes |
 | `NODE_ENV` | Environment (development/production) | Yes |
 | `GEMINI_API_KEY` | Google Gemini API key | Yes |
+| `SUPABASE_URL` | Supabase project URL | Yes |
+| `SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server only) | Yes |
+
+### Client (.env)
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `REACT_APP_SUPABASE_URL` | Supabase project URL | Yes |
+| `REACT_APP_SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
 
 ## API Endpoints
 
