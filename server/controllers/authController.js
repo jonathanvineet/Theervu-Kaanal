@@ -287,7 +287,10 @@ export const loginOfficial = async (req, res) => {
 
 // Admin Login
 export const loginAdmin = async (req, res) => {
-    try {Authenticate with Supabase
+    try {
+        const { email, password } = req.body;
+
+        // Authenticate with Supabase
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
             email,
             password
@@ -309,10 +312,7 @@ export const loginAdmin = async (req, res) => {
             refreshToken: authData.session.refresh_token,
             user: {
                 id: admin._id.toString(),
-                supabaseId: authData.user.id
-            token,
-            user: {
-                id: admin._id.toString(),
+                supabaseId: authData.user.id,
                 firstName: admin.firstName,
                 lastName: admin.lastName,
                 email: admin.email,
